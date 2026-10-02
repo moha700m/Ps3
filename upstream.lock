@@ -1,0 +1,14 @@
+repository = "https://github.com/RPCS3/rpcs3"
+path = "upstream/rpcs3"
+commit = "17320679e329908af40b76a8a48c43025d4acc9a"
+commit_date = 2026-10-01T20:35:46Z
+submodules = "recursive"
+
+[windows]
+minimum_os = "Windows 10"
+architecture = "x64"
+compiler = "Visual Studio 2026 MSVC (18.x), pinned to the upstream Windows CI runner"
+qt_abi_package = "Qt 6.11.2 MSVC 2022 x64, as specified by upstream Windows CI"
+qt = "6.11.2"
+vulkan_sdk = "1.4.341.1"
+llvm = "22.1.8"

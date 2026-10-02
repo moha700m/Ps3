@@ -1,0 +1,314 @@
+name: MohammedLab PS3 Windows x64
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-x64:
+    name: Release build and unit tests
+    runs-on: windows-2025-vs2026
+    env:
+      QT_VER_MAIN: '6'
+      QT_VER: '6.11.2'
+      QT_VER_MSVC: 'msvc2022'
+      QT_DATE: '202608131017'
+      LLVM_VER: '22.1.8'
+      VULKAN_VER: '1.4.341.1'
+      VULKAN_SDK_SHA: 'bcf2d75aa9556889ab974858666e20b3655b6055a0db704ccb47279ff33b5bfe'
+      CCACHE_SHA: '859141059ac950e1e8cd042c66f842f26b9e3a62a1669a69fe6ba180cb58bbdf'
+      CCACHE_BIN_DIR: 'C:\ccache_bin'
+      CCACHE_DIR: 'C:\ccache'
+      CCACHE_INODECACHE: 'true'
+      CCACHE_SLOPPINESS: 'time_macros'
+      CCACHE_MAXSIZE: '7G'
+      DEPS_CACHE_DIR: ./dependency_cache
+      BUILD_REPOSITORY_NAME: ${{ github.repository }}
+      BUILD_SOURCEBRANCHNAME: ${{ github.head_ref || github.ref_name }}
+      BUILD_PR_NUMBER: ${{ github.event.pull_request.number }}
+      BUILD_SOURCEVERSION: ${{ github.sha }}
+      BUILD_ARTIFACTSTAGINGDIRECTORY: ${{ github.workspace }}/artifacts/
+    steps:
+      - name: Check out pinned source and recursive submodules
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          submodules: recursive
+
+      - name: Set up NuGet
+        uses: nuget/setup-nuget@v2.0.0
+
+      - name: Set up Visual Studio 2026 MSBuild
+        uses: microsoft/setup-msbuild@v2.0.0
+        with:
+          vs-version: '[18.0,19.0)'
+          msbuild-architecture: x64
+
+      - name: Verify and record MSVC, linker, and STL versions
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vsInstall = & $vswhere -latest -products '*' -version '[18.0,19.0)' -requires Microsoft.Component.MSBuild -property installationPath
+          $vsVersion = & $vswhere -latest -products '*' -version '[18.0,19.0)' -requires Microsoft.Component.MSBuild -property installationVersion
+          if (-not $vsInstall -or -not $vsVersion.StartsWith('18.')) {
+            throw "Expected Visual Studio 2026 (18.x), found '$vsVersion' at '$vsInstall'."
+          }
+          $msbuildPath = (Get-Command msbuild -ErrorAction Stop).Source
+          if (-not $msbuildPath.StartsWith($vsInstall, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "setup-msbuild selected '$msbuildPath', outside the expected Visual Studio 2026 installation '$vsInstall'."
+          }
+          $vsDevCmd = Join-Path $vsInstall 'Common7\Tools\VsDevCmd.bat'
+          $toolchainCmd = Join-Path $env:RUNNER_TEMP 'toolchain-versions.cmd'
+          @"
+          @echo off
+          call "$vsDevCmd" -no_logo -arch=amd64
+          if errorlevel 1 exit /b %errorlevel%
+          cl /Bv
+          link /? 2>&1 | findstr /b /c:"Microsoft (R) Incremental Linker"
+          "@ | Set-Content -Encoding ascii $toolchainCmd
+          $toolchainOutput = & $env:ComSpec /d /c $toolchainCmd 2>&1
+          if ($LASTEXITCODE -ne 0 -or
+              ($toolchainOutput -join "`n") -notmatch 'Microsoft \(R\) C/C\+\+ Optimizing Compiler Version' -or
+              ($toolchainOutput -join "`n") -notmatch 'Microsoft \(R\) Incremental Linker Version') {
+            $toolchainOutput | Write-Output
+            throw 'Could not verify the selected MSVC compiler and linker versions.'
+          }
+          $toolchainOutput | Write-Output
+          @(
+            "Visual Studio: $vsVersion ($vsInstall)"
+            "MSBuild: $msbuildPath"
+            'Compiler and linker version output:'
+            $toolchainOutput
+          ) | Add-Content $env:GITHUB_STEP_SUMMARY
+
+          $stlSource = Join-Path $env:RUNNER_TEMP 'stl-version.cpp'
+          $stlObject = Join-Path $env:RUNNER_TEMP 'stl-version.obj'
+          $stlCmd = Join-Path $env:RUNNER_TEMP 'stl-version.cmd'
+          @'
+          #include <yvals_core.h>
+          #define STRINGIZE_DETAIL(value) #value
+          #define STRINGIZE(value) STRINGIZE_DETAIL(value)
+          #pragma message("MSVC_STL_VERSION=" STRINGIZE(_MSVC_STL_VERSION))
+          #ifndef _MSVC_STL_UPDATE
+          #define _MSVC_STL_UPDATE 0
+          #endif
+          #pragma message("MSVC_STL_UPDATE=" STRINGIZE(_MSVC_STL_UPDATE))
+          int main() { return 0; }
+          '@ | Set-Content -Encoding ascii $stlSource
+          @"
+          @echo off
+          call "$vsDevCmd" -no_logo -arch=amd64
+          if errorlevel 1 exit /b %errorlevel%
+          cl /nologo /c /TP /W0 "$stlSource" /Fo:"$stlObject"
+          "@ | Set-Content -Encoding ascii $stlCmd
+          $stlOutput = & $env:ComSpec /d /c $stlCmd 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            $stlOutput | Write-Output
+            throw 'Could not query the selected MSVC STL version.'
+          }
+          if (($stlOutput -join "`n") -notmatch 'MSVC_STL_VERSION=\d+') {
+            $stlOutput | Write-Output
+            throw 'The selected MSVC STL version was not found in compiler output.'
+          }
+          $stlOutput | Write-Output
+          $stlOutput | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - name: Get upstream dependency cache keys
+        shell: bash
+        working-directory: upstream/rpcs3
+        run: .ci/get_keys-windows.sh
+
+      - name: Restore MSVC compile cache
+        id: restore-ccache
+        uses: actions/cache/restore@d4323d4df104b026a6aa633fdb11d772146be0bf
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ runner.os }}-vs2026-msvc-ccache-${{ hashFiles('upstream.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ runner.os }}-vs2026-msvc-ccache-${{ hashFiles('upstream.lock') }}-
+
+      - name: Restore upstream dependency downloads
+        id: restore-dependencies-cache
+        uses: actions/cache/restore@d4323d4df104b026a6aa633fdb11d772146be0bf
+        with:
+          path: dependency_cache
+          key: ${{ runner.os }}-vs2026-msvc-${{ env.QT_VER }}-${{ env.VULKAN_SDK_SHA }}-${{ env.CCACHE_SHA }}-${{ hashFiles('upstream/rpcs3/llvm.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-vs2026-msvc-${{ env.QT_VER }}-${{ env.VULKAN_SDK_SHA }}-${{ env.CCACHE_SHA }}-
+
+      - name: Install upstream build dependencies
+        id: install-dependencies
+        shell: bash
+        working-directory: upstream/rpcs3
+        run: |
+          export QTDIR="C:\\Qt\\${QT_VER}\\${QT_VER_MSVC}_64"
+          export VULKAN_SDK="C:\\VulkanSDK\\${VULKAN_VER}"
+          echo "QTDIR=${QTDIR}" >> "$GITHUB_ENV"
+          echo "VULKAN_SDK=${VULKAN_SDK}" >> "$GITHUB_ENV"
+          .ci/setup-windows.sh
+          .ci/setup-windows-ci-vars.sh win64 msvc
+          cat .ci/ci-vars.env >> "$GITHUB_ENV"
+
+      - name: Save upstream dependency downloads
+        if: always() && steps.install-dependencies.outcome == 'success' && steps.restore-dependencies-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@d4323d4df104b026a6aa633fdb11d772146be0bf
+        with:
+          path: dependency_cache
+          key: ${{ steps.restore-dependencies-cache.outputs.cache-primary-key }}
+
+      - name: Restore NuGet packages
+        working-directory: upstream/rpcs3
+        run: nuget restore rpcs3.sln
+
+      - name: Apply MohammedLab first-run setup overlay
+        shell: bash
+        working-directory: upstream/rpcs3
+        run: git apply --unidiff-zero "$GITHUB_WORKSPACE/patches/0001-bilingual-first-run-setup.patch"
+
+      - name: Build MohammedLab PS3 Release x64
+        id: build
+        working-directory: upstream/rpcs3
+        shell: pwsh
+        run: >
+          msbuild rpcs3.sln /p:Configuration=Release /v:minimal /p:Platform=x64
+          /p:PreferredToolArchitecture=x64 /p:CLToolPath=${{ env.CCACHE_BIN_DIR }}
+          /p:UseMultiToolTask=true
+          /p:CustomAfterMicrosoftCommonTargets="${{ github.workspace }}\upstream\rpcs3\buildfiles\msvc\ci_only.targets"
+
+      - name: Save MSVC compile cache
+        if: always() && steps.build.outcome == 'success' && steps.restore-ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@d4323d4df104b026a6aa633fdb11d772146be0bf
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.restore-ccache.outputs.cache-primary-key }}
+
+      - name: Run RPCS3 unit tests
+        working-directory: upstream/rpcs3
+        shell: pwsh
+        run: |
+          & ./build/lib/Release-x64/rpcs3_test.exe 2>&1 | Tee-Object -FilePath test-results.txt
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Capture actual first-run welcome window
+        id: first-run-screenshot
+        if: success()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          ./scripts/capture-first-run.ps1 `
+            -Executable ./upstream/rpcs3/bin/rpcs3.exe `
+            -OutputDirectory ./artifacts/first-run-screenshot
+
+      - name: Upload first-run screenshot and build metadata
+        if: always() && steps.first-run-screenshot.outputs.captured == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mohammedlab-ps3-first-run-${{ github.sha }}
+          path: artifacts/first-run-screenshot/
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Package Windows build and checksum
+        working-directory: upstream/rpcs3
+        shell: bash
+        run: |
+          mkdir -p "$BUILD_ARTIFACTSTAGINGDIRECTORY"
+          .ci/deploy-windows.sh
+          artifact_dir=$(cygpath -u "$BUILD_ARTIFACTSTAGINGDIRECTORY")
+          archive="$artifact_dir/$BUILD"
+          checksum="$archive.sha256"
+          source_checksum="$BUILD.sha256"
+          test -s "$archive" || { echo "Missing build archive: $archive" >&2; exit 1; }
+          test -s "$checksum" || { echo "Missing SHA-256 file: $checksum" >&2; exit 1; }
+
+          read_hash() {
+            local file=$1 normalized
+            normalized=$(tr -d '\r\n' < "$file")
+            if [[ ! "$normalized" =~ ^[[:xdigit:]]{64}$ ]]; then
+              printf 'Invalid SHA-256 content in %s (normalized length: %s)\n' "$file" "${#normalized}" >&2
+              return 1
+            fi
+            printf '%s' "${normalized,,}"
+          }
+
+          verify_hash() {
+            local label=$1 expected=$2 actual=$3
+            if [[ "$expected" != "$actual" ]]; then
+              printf '%s SHA-256 mismatch: expected=%s (length %s), actual=%s (length %s)\n' \
+                "$label" "$expected" "${#expected}" "$actual" "${#actual}" >&2
+              return 1
+            fi
+          }
+
+          normalize_listing() {
+            sed -E 's/\r$//; s#^Path = \./?#Path = #; s#\\#/#g'
+          }
+
+          # Regression check: Windows separators, spaces, and CRLF checksum files.
+          test_dir=$(mktemp -d)
+          trap 'rm -rf "$test_dir"' EXIT
+          mkdir -p "$test_dir/checksum regression"
+          printf 'checksum path conversion regression\n' > "$test_dir/checksum regression/sample.7z"
+          test_hash=$(sha256sum "$test_dir/checksum regression/sample.7z" | cut -d ' ' -f1)
+          printf '%s\r\n' "$test_hash" > "$test_dir/checksum regression/sample.7z.sha256"
+          windows_test_path="$(cygpath -w "$test_dir")\\checksum regression\\sample.7z"
+          posix_test_path="$(cygpath -u "$windows_test_path")"
+          test_expected=$(read_hash "$posix_test_path.sha256")
+          test_actual=$(sha256sum "$posix_test_path" | cut -d ' ' -f1)
+          verify_hash 'Windows path/CRLF regression fixture' "$test_expected" "$test_actual"
+          printf 'Checksum regression fixture passed (%s; Windows path contained backslashes and spaces, checksum used CRLF).\n' \
+            "$windows_test_path"
+
+          rm -rf "$test_dir"
+          trap - EXIT
+
+          expected_hash=$(read_hash "$source_checksum")
+          copied_hash=$(read_hash "$checksum")
+          original_hash=$(sha256sum "$BUILD" | cut -d ' ' -f1)
+          copied_archive_hash=$(sha256sum "$archive" | cut -d ' ' -f1)
+          verify_hash 'Original archive' "$expected_hash" "$original_hash"
+          verify_hash 'Copied archive checksum' "$expected_hash" "$copied_hash"
+          verify_hash 'Copied archive' "$expected_hash" "$copied_archive_hash"
+
+          listing=$(7z l -slt "$archive")
+          printf '%s\n' "$listing" | grep -E 'Path = .*(rpcs3\.exe|qwindows\.dll)$'
+          normalized_listing=$(printf '%s\n' "$listing" | normalize_listing)
+          for required_path in \
+            'rpcs3.exe' \
+            'qt6/plugins/platforms/qwindows.dll'
+          do
+            grep -Fqx "Path = $required_path" <<< "$normalized_listing" ||
+              { echo "Missing required archive resource: $required_path" >&2; exit 1; }
+          done
+          extract_dir=$(mktemp -d)
+          trap 'rm -rf "$extract_dir"' EXIT
+          7z x -y "-o$extract_dir" "$archive" > "$extract_dir/extract.log"
+          test -s "$extract_dir/rpcs3.exe" ||
+            { echo "Archive extraction did not produce rpcs3.exe" >&2; exit 1; }
+          test -s "$extract_dir/qt6/plugins/platforms/qwindows.dll" ||
+            { echo "Archive extraction did not produce Qt's Windows platform plugin" >&2; exit 1; }
+          printf 'Extracted archive contains rpcs3.exe and qt6/plugins/platforms/qwindows.dll.\n'
+
+      - name: Upload validated upstream package and checksum
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mohammedlab-ps3-windows-x64-build
+          path: |
+            artifacts/${{ env.BUILD }}
+            artifacts/${{ env.BUILD }}.sha256
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload unit-test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mohammedlab-ps3-unit-test-report
+          path: upstream/rpcs3/test-results.txt
+          if-no-files-found: ignore
+          compression-level: 0

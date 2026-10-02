@@ -1,0 +1,352 @@
+diff --git a/rpcs3/rpcs3qt/gui_application.cpp b/rpcs3/rpcs3qt/gui_application.cpp
+index 9b5105e47..9196e8590 100644
+--- a/rpcs3/rpcs3qt/gui_application.cpp
++++ b/rpcs3/rpcs3qt/gui_application.cpp
+@@ -229 +229 @@ int gui_application::exec()
+-			welcome_dialog* welcome = new welcome_dialog(m_gui_settings, false);
++			welcome_dialog* welcome = new welcome_dialog(m_gui_settings, m_emu_settings, false, m_main_window);
+@@ -421 +421 @@ void gui_application::SwitchTranslator(const QString& language_code)
+-	else if (language_code != default_code)
++	else if (language_code != default_code && language_code != QStringLiteral("ar"))
+@@ -423 +423 @@ void gui_application::SwitchTranslator(const QString& language_code)
+-		// show error, but ignore default case "en", since it is handled in source code
++		// Keep Arabic selectable even when this build does not include an Arabic catalog.
+@@ -426 +426 @@ void gui_application::SwitchTranslator(const QString& language_code)
+-		// reset current language to default "en"
++		// Other unavailable translations fall back to English.
+@@ -434,0 +435 @@ void gui_application::LoadLanguage(const QString& language_code)
++		QGuiApplication::setLayoutDirection(QLocale(language_code).textDirection());
+@@ -449,0 +451 @@ void gui_application::LoadLanguage(const QString& language_code)
++	QGuiApplication::setLayoutDirection(locale.textDirection());
+@@ -502,0 +505,7 @@ QStringList gui_application::GetAvailableLanguageCodes()
++	// The Arabic setup labels are provided by the application even when no full
++	// RPCS3 Arabic catalog is bundled.
++	if (!language_codes.contains(QStringLiteral("ar")))
++	{
++		language_codes.append(QStringLiteral("ar"));
++	}
++
+diff --git a/rpcs3/rpcs3qt/main_window.cpp b/rpcs3/rpcs3qt/main_window.cpp
+index 4b2421068..6577e502f 100644
+--- a/rpcs3/rpcs3qt/main_window.cpp
++++ b/rpcs3/rpcs3qt/main_window.cpp
+@@ -375,0 +376,25 @@ void main_window::OnMissingFw()
++void main_window::OpenGameFolderPicker()
++{
++	if (!m_gui_settings->GetBootConfirmation(this))
++	{
++		return;
++	}
++
++	const QString last_path = m_gui_settings->GetValue(gui::fd_add_games).toString();
++	const QString dir = QFileDialog::getExistingDirectory(this, tr("Select a folder containing one or more games"), last_path, QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
++	if (dir.isEmpty())
++	{
++		return;
++	}
++
++	m_gui_settings->SetValue(gui::fd_add_games, QFileInfo(dir).path());
++	AddGamesFromDirs(QStringList{dir});
++}
++
++void main_window::OpenControllerSettings()
++{
++	pad_settings_dialog* dlg = new pad_settings_dialog(m_gui_settings, this);
++	dlg->setAttribute(Qt::WA_DeleteOnClose);
++	dlg->open();
++}
++
+@@ -2679,21 +2704 @@ void main_window::CreateConnects()
+-	connect(ui->addGamesAct, &QAction::triggered, this, [this]()
+-	{
+-		if (!m_gui_settings->GetBootConfirmation(this))
+-		{
+-			return;
+-		}
+-
+-		// Only select one folder for now
+-		const QString path_last_add_games = m_gui_settings->GetValue(gui::fd_add_games).toString();
+-		const QString dir = QFileDialog::getExistingDirectory(this, tr("Select a folder containing one or more games"), path_last_add_games, QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+-		if (dir.isEmpty())
+-		{
+-			return;
+-		}
+-
+-		m_gui_settings->SetValue(gui::fd_add_games, QFileInfo(dir).path());
+-
+-		QStringList paths;
+-		paths << dir;
+-		AddGamesFromDirs(std::move(paths));
+-	});
++	connect(ui->addGamesAct, &QAction::triggered, this, &main_window::OpenGameFolderPicker);
+@@ -3036,8 +3041 @@ void main_window::CreateConnects()
+-	const auto open_pad_settings = [this]
+-	{
+-		pad_settings_dialog* dlg = new pad_settings_dialog(m_gui_settings, this);
+-		dlg->setAttribute(Qt::WA_DeleteOnClose);
+-		dlg->open();
+-	};
+-
+-	connect(ui->confPadsAct, &QAction::triggered, this, open_pad_settings);
++	connect(ui->confPadsAct, &QAction::triggered, this, &main_window::OpenControllerSettings);
+@@ -3594 +3592 @@ void main_window::CreateConnects()
+-		welcome_dialog* welcome = new welcome_dialog(m_gui_settings, true, this);
++		welcome_dialog* welcome = new welcome_dialog(m_gui_settings, m_emu_settings, true, this);
+@@ -3695 +3693 @@ void main_window::CreateConnects()
+-	connect(ui->toolbar_controls, &QAction::triggered, this, open_pad_settings);
++	connect(ui->toolbar_controls, &QAction::triggered, this, &main_window::OpenControllerSettings);
+diff --git a/rpcs3/rpcs3qt/main_window.h b/rpcs3/rpcs3qt/main_window.h
+index 6a7bb99b5..06bb6c32a 100644
+--- a/rpcs3/rpcs3qt/main_window.h
++++ b/rpcs3/rpcs3qt/main_window.h
+@@ -76,0 +77,2 @@ public:
++	void OpenGameFolderPicker();
++	void OpenControllerSettings();
+diff --git a/rpcs3/rpcs3qt/welcome_dialog.cpp b/rpcs3/rpcs3qt/welcome_dialog.cpp
+index 9eb7bfbd5..251eea72c 100644
+--- a/rpcs3/rpcs3qt/welcome_dialog.cpp
++++ b/rpcs3/rpcs3qt/welcome_dialog.cpp
+@@ -4,0 +5,2 @@
++#include "emu_settings.h"
++#include "main_window.h"
+@@ -8,0 +11,2 @@
++#include "Input/pad_thread.h"
++#include "util/sysinfo.hpp"
+@@ -9,0 +14,8 @@
++#include <QComboBox>
++#include <QDir>
++#include <QGroupBox>
++#include <QHBoxLayout>
++#include <QLabel>
++#include <QStorageInfo>
++#include <QStandardPaths>
++#include <QTemporaryFile>
+@@ -11,0 +24 @@
++#include <QSysInfo>
+@@ -12,0 +26,2 @@
++#include <QThread>
++#include <QVBoxLayout>
+@@ -14 +29,3 @@
+-welcome_dialog::welcome_dialog(std::shared_ptr<gui_settings> gui_settings, bool is_manual_show, QWidget* parent)
++#include <algorithm>
++
++welcome_dialog::welcome_dialog(std::shared_ptr<gui_settings> gui_settings, std::shared_ptr<emu_settings> emu_settings, bool is_manual_show, QWidget* parent)
+@@ -17,0 +35 @@ welcome_dialog::welcome_dialog(std::shared_ptr<gui_settings> gui_settings, bool
++	, m_emu_settings(std::move(emu_settings))
+@@ -46,0 +65,205 @@ welcome_dialog::welcome_dialog(std::shared_ptr<gui_settings> gui_settings, bool
++	auto* setup_group = new QGroupBox(this);
++	auto* setup_layout = new QVBoxLayout(setup_group);
++
++	auto* language_layout = new QHBoxLayout();
++	auto* language_label = new QLabel(setup_group);
++	auto* language_combo = new QComboBox(setup_group);
++	language_combo->addItem(QStringLiteral("English"), QStringLiteral("en"));
++	language_combo->addItem(QStringLiteral("العربية"), QStringLiteral("ar"));
++	language_layout->addWidget(language_label);
++	language_layout->addWidget(language_combo);
++	language_layout->addStretch();
++	setup_layout->addLayout(language_layout);
++
++	auto* setup_description = new QLabel(setup_group);
++	setup_description->setWordWrap(true);
++	setup_layout->addWidget(setup_description);
++
++	auto* setup_buttons = new QHBoxLayout();
++	auto* firmware_button = new QPushButton(setup_group);
++	auto* games_button = new QPushButton(setup_group);
++	auto* controller_button = new QPushButton(setup_group);
++	setup_buttons->addWidget(firmware_button);
++	setup_buttons->addWidget(games_button);
++	setup_buttons->addWidget(controller_button);
++	setup_layout->addLayout(setup_buttons);
++
++	auto* sony_link = new QLabel(setup_group);
++	sony_link->setTextFormat(Qt::RichText);
++	sony_link->setOpenExternalLinks(true);
++	setup_layout->addWidget(sony_link);
++
++	const u64 total_memory = utils::get_total_memory();
++	const int logical_processors = QThread::idealThreadCount();
++	const QString cpu_name = QString::fromStdString(utils::get_cpu_brand());
++	const QString cpu_arch = QSysInfo::currentCpuArchitecture();
++	const bool has_ssse3 = utils::has_ssse3();
++	const bool has_sse41 = utils::has_sse41();
++	const bool has_avx = utils::has_avx();
++	const bool has_avx2 = utils::has_avx2();
++	const QString memory = total_memory ? QStringLiteral("%1 GiB").arg(static_cast<double>(total_memory) / (1024.0 * 1024 * 1024), 0, 'f', 1) : tr("Unavailable");
++
++	QString open_gl_status = tr("Unavailable");
++	QString vulkan_status = tr("Unavailable");
++	QString vulkan_adapters = tr("Not enumerated");
++	if (m_emu_settings && m_emu_settings->m_render_creator)
++	{
++		const auto& renderer = *m_emu_settings->m_render_creator;
++		open_gl_status = renderer.OpenGL.supported ? tr("Backend available; GPU not probed") : tr("Backend unavailable");
++		if (m_emu_settings->m_render_creator->vulkan_timed_out)
++		{
++			vulkan_status = tr("Detection timed out");
++		}
++		else
++		{
++			vulkan_status = renderer.Vulkan.supported ? tr("Detected") : tr("Not detected");
++			if (!renderer.Vulkan.adapters.isEmpty())
++			{
++				vulkan_adapters = renderer.Vulkan.adapters.join(QStringLiteral(", "));
++			}
++		}
++	}
++
++	const QString app_data_path = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
++	const bool app_data_directory_created = !app_data_path.isEmpty() && QDir().mkpath(app_data_path);
++	const QStorageInfo storage(app_data_path);
++	const QString free_space = storage.isValid() ? QStringLiteral("%1 GiB").arg(static_cast<double>(storage.bytesAvailable()) / (1024.0 * 1024 * 1024), 0, 'f', 1) : tr("Unavailable");
++	QTemporaryFile write_probe(QDir(app_data_path).filePath(QStringLiteral(".write-test-XXXXXX")));
++	const bool writable = app_data_directory_created && write_probe.open();
++	write_probe.close();
++
++	int connected_controllers = -1;
++	if (pad_thread* active_pad_thread = pad::get_pad_thread(true))
++	{
++		std::lock_guard lock(pad::g_pad_mutex);
++		const auto& pads = active_pad_thread->GetPads();
++		connected_controllers = static_cast<int>(std::count_if(pads.cbegin(), pads.cend(), [](const std::shared_ptr<Pad>& pad)
++			{
++				return pad && pad->is_connected();
++			}));
++	}
++
++	auto* system_summary = new QLabel(setup_group);
++	system_summary->setWordWrap(true);
++	system_summary->setTextFormat(Qt::RichText);
++	setup_layout->addWidget(system_summary);
++
++	const auto set_setup_language = [=](bool arabic)
++	{
++		setup_group->setTitle(arabic ? QStringLiteral("الإعداد السريع") : QStringLiteral("Quick setup"));
++		setup_group->setLayoutDirection(arabic ? Qt::RightToLeft : Qt::LeftToRight);
++		language_label->setText(arabic ? QStringLiteral("اللغة:") : QStringLiteral("Language:"));
++		setup_description->setText(arabic ? QStringLiteral("ثبّت البرنامج الثابت، أضف مجلد ألعابك، ثم أعد إعداد وحدة التحكم باستخدام أدوات RPCS3 الأصلية.") : QStringLiteral("Install firmware, add your own game folder, then configure a controller using RPCS3's existing tools."));
++		firmware_button->setText(arabic ? QStringLiteral("تثبيت البرنامج الثابت") : QStringLiteral("Install firmware"));
++		games_button->setText(arabic ? QStringLiteral("إضافة مجلد ألعاب") : QStringLiteral("Add game folder"));
++		controller_button->setText(arabic ? QStringLiteral("إعداد التحكم") : QStringLiteral("Configure controller"));
++		sony_link->setText(QStringLiteral("<a href=\"https://www.playstation.com/ar-sa/support/hardware/ps3/system-software/\">") + (arabic ? QStringLiteral("صفحة برنامج النظام الرسمية من سوني") : QStringLiteral("Official Sony firmware page")) + QStringLiteral("</a>"));
++
++		const QString yes = arabic ? QStringLiteral("نعم") : QStringLiteral("Yes");
++		const QString no = arabic ? QStringLiteral("لا") : QStringLiteral("No");
++		const QString unavailable = arabic ? QStringLiteral("غير متاح") : QStringLiteral("Unavailable");
++		const QString cpu_threads = logical_processors > 0 ? QString::number(logical_processors) : unavailable;
++		const QString os = QStringLiteral("<span dir=\"ltr\">%1</span>").arg(QSysInfo::prettyProductName().toHtmlEscaped());
++		const QString cpu = QStringLiteral("<span dir=\"ltr\">%1</span>").arg(cpu_name.isEmpty() ? unavailable : cpu_name.toHtmlEscaped());
++		const QString architecture = QStringLiteral("<span dir=\"ltr\">%1</span>").arg(cpu_arch.toHtmlEscaped());
++		const QString feature_status = QStringLiteral("SSSE3: %1, SSE4.1: %2, AVX: %3, AVX2: %4")
++		                                   .arg(has_ssse3 ? yes : no, has_sse41 ? yes : no, has_avx ? yes : no, has_avx2 ? yes : no);
++		const QString cpu_status = arabic ? QStringLiteral("%1 (%2)، %3 معالج منطقي؛ <span dir=\"ltr\">%4</span>").arg(cpu, architecture, cpu_threads, feature_status) : QStringLiteral("%1 (%2), %3 logical CPU(s); <span dir=\"ltr\">%4</span>").arg(cpu, architecture, cpu_threads, feature_status);
++		const QString ram = total_memory ? memory : unavailable;
++		QString vulkan = unavailable;
++		if (vulkan_status == tr("Detected"))
++		{
++			vulkan = arabic ? QStringLiteral("مكتشف") : QStringLiteral("Detected");
++		}
++		else if (vulkan_status == tr("Detection timed out"))
++		{
++			vulkan = arabic ? QStringLiteral("انتهت مهلة الفحص") : QStringLiteral("Detection timed out");
++		}
++		else if (vulkan_status == tr("Not detected"))
++		{
++			vulkan = arabic ? QStringLiteral("غير مكتشف") : QStringLiteral("Not detected");
++		}
++		QString gl = unavailable;
++		if (open_gl_status == tr("Backend available; GPU not probed"))
++		{
++			gl = arabic ? QStringLiteral("المسار متاح؛ لم يُفحص المعالج الرسومي") : QStringLiteral("Backend available; GPU not probed");
++		}
++		else if (open_gl_status == tr("Backend unavailable"))
++		{
++			gl = arabic ? QStringLiteral("المسار غير متاح") : QStringLiteral("Backend unavailable");
++		}
++		const QString writable_text = arabic ? (writable ? QStringLiteral("قابل للكتابة") : QStringLiteral("غير قابل للكتابة")) : (writable ? QStringLiteral("Writable") : QStringLiteral("Not writable"));
++		QString controller;
++		if (connected_controllers < 0)
++		{
++			controller = arabic ? QStringLiteral("لم تُعدّد؛ لا توجد جلسة تحكم نشطة (وحدة التحكم اختيارية)") : QStringLiteral("Not enumerated; no active controller session (controllers are optional)");
++		}
++		else
++		{
++			controller = arabic ? QStringLiteral("%1 منفذ تحكم متصل في RPCS3").arg(connected_controllers) : QStringLiteral("%1 connected RPCS3 pad slot(s)").arg(connected_controllers);
++		}
++		const QString heading = arabic ? QStringLiteral("<b>فحص مبدئي (لا يضمن التوافق):</b>") : QStringLiteral("<b>Initial diagnostics (not a compatibility guarantee):</b>");
++		const QString disk_label = arabic ? QStringLiteral("المساحة الحرة") : QStringLiteral("Free disk space");
++		const QString data_label = arabic ? QStringLiteral("مسار بيانات المستخدم") : QStringLiteral("User data path");
++		const QString memory_label = arabic ? QStringLiteral("الذاكرة") : QStringLiteral("RAM");
++		const QString cpu_label = arabic ? QStringLiteral("المعالج") : QStringLiteral("CPU");
++		const QString system_label = arabic ? QStringLiteral("النظام") : QStringLiteral("Operating system");
++		const QString input_label = arabic ? QStringLiteral("أجهزة التحكم") : QStringLiteral("Controllers");
++		const QString adapters_label = arabic ? QStringLiteral("أجهزة Vulkan") : QStringLiteral("Vulkan adapters");
++		const QString open_gl_label = arabic ? QStringLiteral("مسار OpenGL") : QStringLiteral("OpenGL backend");
++		const QString vulkan_label = arabic ? QStringLiteral("دعم Vulkan") : QStringLiteral("Vulkan support");
++		const auto row = [](const QString& label, const QString& value)
++		{
++			return QStringLiteral("<tr><td>%1</td><td>%2</td></tr>").arg(label, value);
++		};
++		const QStringList rows{
++			row(system_label, os),
++			row(cpu_label, cpu_status),
++			row(memory_label, ram),
++			row(vulkan_label, vulkan),
++			row(open_gl_label, gl),
++			row(adapters_label, QStringLiteral("<span dir=\"ltr\">%1</span>").arg(vulkan_adapters.toHtmlEscaped())),
++			row(disk_label, free_space),
++			row(input_label, controller),
++			row(data_label, QStringLiteral("<span dir=\"ltr\">%1</span> (%2)").arg(app_data_path.toHtmlEscaped(), writable_text))};
++		system_summary->setText(heading + QStringLiteral("<table>") + rows.join(QString{}) + QStringLiteral("</table>"));
++	};
++
++	const QString saved_language = m_gui_settings->GetValue(gui::loc_language).toString();
++	const bool initially_arabic = saved_language.startsWith(QStringLiteral("ar"), Qt::CaseInsensitive);
++	language_combo->setCurrentIndex(initially_arabic ? 1 : 0);
++	set_setup_language(initially_arabic);
++	auto* window = qobject_cast<main_window*>(parent);
++	connect(language_combo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this, language_combo, set_setup_language, window](int index)
++		{
++			const QString code = language_combo->itemData(index).toString();
++			const bool arabic = code == QStringLiteral("ar");
++			set_setup_language(arabic);
++			if (window)
++			{
++				Q_EMIT window->RequestLanguageChange(code);
++			}
++			else
++			{
++				m_gui_settings->SetValue(gui::loc_language, code);
++			}
++		});
++
++	if (window)
++	{
++		connect(firmware_button, &QPushButton::clicked, window, [window]()
++			{
++				main_window::InstallPup(window);
++			});
++		connect(games_button, &QPushButton::clicked, window, &main_window::OpenGameFolderPicker);
++		connect(controller_button, &QPushButton::clicked, window, &main_window::OpenControllerSettings);
++	}
++	else
++	{
++		firmware_button->setEnabled(false);
++		games_button->setEnabled(false);
++		controller_button->setEnabled(false);
++	}
++
++	ui->layout_bottom->insertWidget(0, setup_group);
++
+diff --git a/rpcs3/rpcs3qt/welcome_dialog.h b/rpcs3/rpcs3qt/welcome_dialog.h
+index 3f04cfdb9..706e7fde7 100644
+--- a/rpcs3/rpcs3qt/welcome_dialog.h
++++ b/rpcs3/rpcs3qt/welcome_dialog.h
+@@ -10,0 +11 @@ class gui_settings;
++class emu_settings;
+@@ -17 +18 @@ public:
+-	explicit welcome_dialog(std::shared_ptr<gui_settings> gui_settings, bool is_manual_show, QWidget* parent = nullptr);
++	explicit welcome_dialog(std::shared_ptr<gui_settings> gui_settings, std::shared_ptr<emu_settings> emu_settings, bool is_manual_show, QWidget* parent = nullptr);
+@@ -22,0 +24 @@ private:
++	std::shared_ptr<emu_settings> m_emu_settings;

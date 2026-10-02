@@ -1,0 +1,3 @@
+[submodule "upstream/rpcs3"]
+	path = upstream/rpcs3
+	url = https://github.com/RPCS3/rpcs3.git

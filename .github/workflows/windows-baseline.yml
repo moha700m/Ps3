@@ -1,0 +1,97 @@
+name: Windows RPCS3 baseline
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-x64:
+    name: Unmodified upstream Release and unit tests
+    runs-on: windows-2022
+    env:
+      QT_VER_MAIN: '6'
+      QT_VER: '6.11.2'
+      QT_VER_MSVC: 'msvc2022'
+      QT_DATE: '202608131017'
+      LLVM_VER: '22.1.8'
+      VULKAN_VER: '1.4.341.1'
+      VULKAN_SDK_SHA: 'bcf2d75aa9556889ab974858666e20b3655b6055a0db704ccb47279ff33b5bfe'
+      CCACHE_SHA: '859141059ac950e1e8cd042c66f842f26b9e3a62a1669a69fe6ba180cb58bbdf'
+      CCACHE_BIN_DIR: 'C:\ccache_bin'
+      CCACHE_DIR: 'C:\ccache'
+      CCACHE_INODECACHE: 'true'
+      CCACHE_SLOPPINESS: 'time_macros'
+      CCACHE_MAXSIZE: '7G'
+      DEPS_CACHE_DIR: ./dependency_cache
+      BUILD_REPOSITORY_NAME: ${{ github.repository }}
+      BUILD_SOURCEBRANCHNAME: ${{ github.head_ref || github.ref_name }}
+      BUILD_PR_NUMBER: ${{ github.event.pull_request.number }}
+      BUILD_SOURCEVERSION: ${{ github.sha }}
+      BUILD_ARTIFACTSTAGINGDIRECTORY: ${{ github.workspace }}/artifacts/
+    steps:
+      - name: Check out pinned source and recursive submodules
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          submodules: recursive
+
+      - name: Set up NuGet
+        uses: nuget/setup-nuget@v2.0.0
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2.0.0
+
+      - name: Install upstream build dependencies
+        shell: bash
+        working-directory: upstream/rpcs3
+        run: |
+          export QTDIR="C:\\Qt\\${QT_VER}\\${QT_VER_MSVC}_64"
+          export VULKAN_SDK="C:\\VulkanSDK\\${VULKAN_VER}"
+          echo "QTDIR=${QTDIR}" >> "$GITHUB_ENV"
+          echo "VULKAN_SDK=${VULKAN_SDK}" >> "$GITHUB_ENV"
+          .ci/get_keys-windows.sh
+          .ci/setup-windows.sh
+          .ci/setup-windows-ci-vars.sh win64 msvc
+          cat .ci/ci-vars.env >> "$GITHUB_ENV"
+
+      - name: Restore NuGet packages
+        working-directory: upstream/rpcs3
+        run: nuget restore rpcs3.sln
+
+      - name: Build upstream Release x64
+        working-directory: upstream/rpcs3
+        shell: pwsh
+        run: >
+          msbuild rpcs3.sln /p:Configuration=Release /v:minimal /p:Platform=x64
+          /p:PreferredToolArchitecture=x64 /p:CLToolPath=${{ env.CCACHE_BIN_DIR }}
+          /p:UseMultiToolTask=true
+          /p:CustomAfterMicrosoftCommonTargets="${{ github.workspace }}\upstream\rpcs3\buildfiles\msvc\ci_only.targets"
+
+      - name: Run upstream unit tests
+        working-directory: upstream/rpcs3
+        shell: pwsh
+        run: |
+          & ./build/lib/Release-x64/rpcs3_test.exe 2>&1 | Tee-Object -FilePath test-results.txt
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Package upstream baseline and checksum
+        working-directory: upstream/rpcs3
+        shell: bash
+        run: |
+          mkdir -p "$BUILD_ARTIFACTSTAGINGDIRECTORY"
+          .ci/deploy-windows.sh
+
+      - name: Upload build, checksum, and test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rpcs3-upstream-baseline-windows-x64
+          path: |
+            artifacts/*
+            upstream/rpcs3/test-results.txt
+          if-no-files-found: warn
+          compression-level: 0

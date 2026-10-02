@@ -46,14 +46,15 @@ The default upstream settings and required CPU feature level otherwise remain un
 
 ## Verification status and scope
 
-The [hosted Windows run](https://github.com/moha700m/Ps3/actions/runs/36959767086) for the pinned
+The [hosted Windows run](https://github.com/moha700m/Ps3/actions/runs/36964132376) for the pinned
 source and VS2026 toolchain completed the unmodified upstream Release build and passed 150 unit tests
-across 16 test cases. Its package step failed during SHA-256 verification, so no binary artifact was
-uploaded from that run. The workflow now uses POSIX-normalized paths for GNU `sha256sum`, validates
-the digest format and CR/LF handling, checks both the original and copied archive against the original
-checksum, and runs Windows-backslash/path-with-spaces/CRLF and 7z path-separator regression fixtures.
-The packaging correction still needs a successful hosted run. A hosted build or unit-test pass does
-not demonstrate GUI behavior,
+across 16 test cases. Checksum validation and the Windows-backslash/path-with-spaces/CRLF checksum
+fixture passed, but package validation failed because the workflow expected `bin/rpcs3.exe`; the
+actual 7z listing has `rpcs3.exe` and `qt6\plugins\platforms\qwindows.dll` at archive root. No binary
+artifact was uploaded. The workflow now validates those observed root paths, extracts the archive,
+checks both required files exist, and caches upstream dependency downloads and MSVC compilation
+results to avoid unnecessary repeated downloads and compilation. This correction still needs a
+successful hosted run. A hosted build or unit-test pass does not demonstrate GUI behavior,
 GPU/backend compatibility, game boot, performance, physical controller behavior, or a portable
 end-user package. Those require separate Windows hardware and user-owned test content. This repository
 does not include firmware, games, or license files.

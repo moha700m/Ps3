@@ -115,7 +115,31 @@ jobs:
           $stlOutput | Write-Output
           $stlOutput | Add-Content $env:GITHUB_STEP_SUMMARY
 
+      - name: Get upstream dependency cache keys
+        shell: bash
+        working-directory: upstream/rpcs3
+        run: .ci/get_keys-windows.sh
+
+      - name: Restore MSVC compile cache
+        id: restore-ccache
+        uses: actions/cache/restore@d4323d4df104b026a6aa633fdb11d772146be0bf
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ runner.os }}-vs2026-msvc-ccache-${{ hashFiles('upstream.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ runner.os }}-vs2026-msvc-ccache-${{ hashFiles('upstream.lock') }}-
+
+      - name: Restore upstream dependency downloads
+        id: restore-dependencies-cache
+        uses: actions/cache/restore@d4323d4df104b026a6aa633fdb11d772146be0bf
+        with:
+          path: dependency_cache
+          key: ${{ runner.os }}-vs2026-msvc-${{ env.QT_VER }}-${{ env.VULKAN_SDK_SHA }}-${{ env.CCACHE_SHA }}-${{ hashFiles('upstream/rpcs3/llvm.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-vs2026-msvc-${{ env.QT_VER }}-${{ env.VULKAN_SDK_SHA }}-${{ env.CCACHE_SHA }}-
+
       - name: Install upstream build dependencies
+        id: install-dependencies
         shell: bash
         working-directory: upstream/rpcs3
         run: |
@@ -123,16 +147,23 @@ jobs:
           export VULKAN_SDK="C:\\VulkanSDK\\${VULKAN_VER}"
           echo "QTDIR=${QTDIR}" >> "$GITHUB_ENV"
           echo "VULKAN_SDK=${VULKAN_SDK}" >> "$GITHUB_ENV"
-          .ci/get_keys-windows.sh
           .ci/setup-windows.sh
           .ci/setup-windows-ci-vars.sh win64 msvc
           cat .ci/ci-vars.env >> "$GITHUB_ENV"
+
+      - name: Save upstream dependency downloads
+        if: always() && steps.install-dependencies.outcome == 'success' && steps.restore-dependencies-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@d4323d4df104b026a6aa633fdb11d772146be0bf
+        with:
+          path: dependency_cache
+          key: ${{ steps.restore-dependencies-cache.outputs.cache-primary-key }}
 
       - name: Restore NuGet packages
         working-directory: upstream/rpcs3
         run: nuget restore rpcs3.sln
 
       - name: Build upstream Release x64
+        id: build
         working-directory: upstream/rpcs3
         shell: pwsh
         run: >
@@ -140,6 +171,13 @@ jobs:
           /p:PreferredToolArchitecture=x64 /p:CLToolPath=${{ env.CCACHE_BIN_DIR }}
           /p:UseMultiToolTask=true
           /p:CustomAfterMicrosoftCommonTargets="${{ github.workspace }}\upstream\rpcs3\buildfiles\msvc\ci_only.targets"
+
+      - name: Save MSVC compile cache
+        if: always() && steps.build.outcome == 'success' && steps.restore-ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@d4323d4df104b026a6aa633fdb11d772146be0bf
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.restore-ccache.outputs.cache-primary-key }}
 
       - name: Run upstream unit tests
         working-directory: upstream/rpcs3
@@ -183,7 +221,7 @@ jobs:
           }
 
           normalize_listing() {
-            sed -E 's#^Path = \./?#Path = #; s#\\#/#g'
+            sed -E 's/\r$//; s#^Path = \./?#Path = #; s#\\#/#g'
           }
 
           # Regression check: Windows separators, spaces, and CRLF checksum files.
@@ -201,11 +239,6 @@ jobs:
           printf 'Checksum regression fixture passed (%s; Windows path contained backslashes and spaces, checksum used CRLF).\n' \
             "$windows_test_path"
 
-          test_listing=$(printf 'Path = bin\\rpcs3.exe\nPath = ./bin\\qt6\\plugins\\platforms\\qwindows.dll\n')
-          normalized_test_listing=$(printf '%s\n' "$test_listing" | normalize_listing)
-          grep -Fqx 'Path = bin/rpcs3.exe' <<< "$normalized_test_listing"
-          grep -Fqx 'Path = bin/qt6/plugins/platforms/qwindows.dll' <<< "$normalized_test_listing"
-          printf '7z path normalization regression fixture passed.\n'
           rm -rf "$test_dir"
           trap - EXIT
 
@@ -218,15 +251,23 @@ jobs:
           verify_hash 'Copied archive' "$expected_hash" "$copied_archive_hash"
 
           listing=$(7z l -slt "$archive")
-          printf '%s\n' "$listing" | grep -E 'Path = .*(rpcs3\.exe|qwindows\.dll)$' || true
+          printf '%s\n' "$listing" | grep -E 'Path = .*(rpcs3\.exe|qwindows\.dll)$'
           normalized_listing=$(printf '%s\n' "$listing" | normalize_listing)
           for required_path in \
-            'bin/rpcs3.exe' \
-            'bin/qt6/plugins/platforms/qwindows.dll'
+            'rpcs3.exe' \
+            'qt6/plugins/platforms/qwindows.dll'
           do
             grep -Fqx "Path = $required_path" <<< "$normalized_listing" ||
               { echo "Missing required archive resource: $required_path" >&2; exit 1; }
           done
+          extract_dir=$(mktemp -d)
+          trap 'rm -rf "$extract_dir"' EXIT
+          7z x -y "-o$extract_dir" "$archive" > "$extract_dir/extract.log"
+          test -s "$extract_dir/rpcs3.exe" ||
+            { echo "Archive extraction did not produce rpcs3.exe" >&2; exit 1; }
+          test -s "$extract_dir/qt6/plugins/platforms/qwindows.dll" ||
+            { echo "Archive extraction did not produce Qt's Windows platform plugin" >&2; exit 1; }
+          printf 'Extracted archive contains rpcs3.exe and qt6/plugins/platforms/qwindows.dll.\n'
 
       - name: Upload validated upstream package and checksum
         if: success()

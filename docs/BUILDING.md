@@ -73,9 +73,20 @@ the panel does not certify hardware compatibility, enumerate physical controller
 RPCS3 input session, or test buttons. The modified patch still needs a hosted Windows build, upstream
 unit tests, and GUI validation; the successful baseline run above validates only unmodified RPCS3.
 
+After the unit tests, the Windows workflow attempts to launch the just-built
+`upstream/rpcs3/bin/rpcs3.exe` with fresh temporary Windows user-data directories and capture its
+actual `Welcome to RPCS3` window. It does not provide firmware, games, or controller devices. A PNG
+and metadata containing the source commit and Actions run URL are uploaded as a separate artifact
+only if the visible application window can be captured and the image is nonblank. If the hosted
+runner has no usable interactive desktop, the workflow records the capture reason and continues the
+build/package without publishing a screenshot. This is an attempt configured in CI, not evidence of
+a capture: run `36995778622` for commit `492e87e` was `action_required` with zero jobs, so it produced
+no screenshot or modified-build result. A screenshot must be taken from a future successful run's
+artifact before claiming the UI was shown.
+
 The complete Arabic translation, compatibility-requirements comparison, full controller
 connection/button testing, `MohammedLab-PS3-Windows-x64.zip`, matching-source release bundle, and
-isolated extracted-user smoke test remain unfinished. A hosted build/unit-test pass does not
-demonstrate GUI behavior, GPU/backend compatibility, game boot, performance, or physical-controller
-behavior; those need separate Windows hardware and user-owned test content. Firmware, games, and
-license files are not included in this repository or CI.
+isolated extracted-user smoke test remain unfinished. A hosted build/unit-test/screenshot pass does
+not demonstrate GPU/backend compatibility, game boot, performance, or physical-controller behavior;
+those need separate Windows hardware and user-owned test content. Firmware, games, and license files
+are not included in this repository or CI.

@@ -193,6 +193,25 @@ jobs:
             exit $LASTEXITCODE
           }
 
+      - name: Capture actual first-run welcome window
+        id: first-run-screenshot
+        if: success()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          ./scripts/capture-first-run.ps1 `
+            -Executable ./upstream/rpcs3/bin/rpcs3.exe `
+            -OutputDirectory ./artifacts/first-run-screenshot
+
+      - name: Upload first-run screenshot and build metadata
+        if: always() && steps.first-run-screenshot.outputs.captured == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mohammedlab-ps3-first-run-${{ github.sha }}
+          path: artifacts/first-run-screenshot/
+          if-no-files-found: error
+          compression-level: 0
+
       - name: Package Windows build and checksum
         working-directory: upstream/rpcs3
         shell: bash

@@ -80,9 +80,11 @@ and metadata containing the source commit and Actions run URL are uploaded as a 
 only if the visible application window can be captured and the image is nonblank. If the hosted
 runner has no usable interactive desktop, the workflow records the capture reason and continues the
 build/package without publishing a screenshot. This is an attempt configured in CI, not evidence of
-a capture: run `36995778622` for commit `492e87e` was `action_required` with zero jobs, so it produced
-no screenshot or modified-build result. A screenshot must be taken from a future successful run's
-artifact before claiming the UI was shown.
+a capture: run [`36996196733`](https://github.com/moha700m/Ps3/actions/runs/36996196733) for commit
+`5635a97` is `action_required` with zero jobs. It has no job logs or artifacts, so the modified
+Windows build and screenshot attempt have not run. The earlier UI run `36995778622` was likewise
+`action_required`. A screenshot must be taken from a future successful run's artifact before
+claiming the UI was shown.
 
 The complete Arabic translation, compatibility-requirements comparison, full controller
 connection/button testing, `MohammedLab-PS3-Windows-x64.zip`, matching-source release bundle, and

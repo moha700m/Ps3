@@ -1,4 +1,4 @@
-name: Windows RPCS3 baseline
+name: MohammedLab PS3 Windows x64
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   release-x64:
-    name: Unmodified upstream Release and unit tests
+    name: Release build and unit tests
     runs-on: windows-2025-vs2026
     env:
       QT_VER_MAIN: '6'
@@ -162,7 +162,12 @@ jobs:
         working-directory: upstream/rpcs3
         run: nuget restore rpcs3.sln
 
-      - name: Build upstream Release x64
+      - name: Apply MohammedLab first-run setup overlay
+        shell: bash
+        working-directory: upstream/rpcs3
+        run: git apply "$GITHUB_WORKSPACE/patches/0001-bilingual-first-run-setup.patch"
+
+      - name: Build MohammedLab PS3 Release x64
         id: build
         working-directory: upstream/rpcs3
         shell: pwsh
@@ -179,7 +184,7 @@ jobs:
           path: ${{ env.CCACHE_DIR }}
           key: ${{ steps.restore-ccache.outputs.cache-primary-key }}
 
-      - name: Run upstream unit tests
+      - name: Run RPCS3 unit tests
         working-directory: upstream/rpcs3
         shell: pwsh
         run: |
@@ -188,7 +193,7 @@ jobs:
             exit $LASTEXITCODE
           }
 
-      - name: Package upstream baseline and checksum
+      - name: Package Windows build and checksum
         working-directory: upstream/rpcs3
         shell: bash
         run: |
@@ -273,7 +278,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: rpcs3-upstream-baseline-windows-x64
+          name: mohammedlab-ps3-windows-x64-build
           path: |
             artifacts/${{ env.BUILD }}
             artifacts/${{ env.BUILD }}.sha256
@@ -284,7 +289,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: rpcs3-upstream-unit-test-report
+          name: mohammedlab-ps3-unit-test-report
           path: upstream/rpcs3/test-results.txt
           if-no-files-found: ignore
           compression-level: 0

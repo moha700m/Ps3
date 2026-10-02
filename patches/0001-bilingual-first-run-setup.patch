@@ -1,0 +1,205 @@
+diff --git a/rpcs3/rpcs3qt/gui_application.cpp b/rpcs3/rpcs3qt/gui_application.cpp
+index 9b5105e47..a2d1009fb 100644
+--- a/rpcs3/rpcs3qt/gui_application.cpp
++++ b/rpcs3/rpcs3qt/gui_application.cpp
+@@ -226,7 +226,7 @@ int gui_application::exec()
+ 	{
+ 		steps->push_back([this]()
+ 		{
+-			welcome_dialog* welcome = new welcome_dialog(m_gui_settings, false);
++			welcome_dialog* welcome = new welcome_dialog(m_gui_settings, false, m_main_window);
+ 			connect(welcome, &QDialog::finished, this, [this](int result)
+ 			{
+ 				if (result == QDialog::Rejected)
+diff --git a/rpcs3/rpcs3qt/main_window.cpp b/rpcs3/rpcs3qt/main_window.cpp
+index 4b2421068..37f9e0bd0 100644
+--- a/rpcs3/rpcs3qt/main_window.cpp
++++ b/rpcs3/rpcs3qt/main_window.cpp
+@@ -373,6 +373,31 @@ void main_window::OnMissingFw()
+ 	});
+ }
+ 
++void main_window::OpenGameFolderPicker()
++{
++	if (!m_gui_settings->GetBootConfirmation(this))
++	{
++		return;
++	}
++
++	const QString last_path = m_gui_settings->GetValue(gui::fd_add_games).toString();
++	const QString dir = QFileDialog::getExistingDirectory(this, tr("Select a folder containing one or more games"), last_path, QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
++	if (dir.isEmpty())
++	{
++		return;
++	}
++
++	m_gui_settings->SetValue(gui::fd_add_games, QFileInfo(dir).path());
++	AddGamesFromDirs(QStringList{dir});
++}
++
++void main_window::OpenControllerSettings()
++{
++	pad_settings_dialog* dlg = new pad_settings_dialog(m_gui_settings, this);
++	dlg->setAttribute(Qt::WA_DeleteOnClose);
++	dlg->open();
++}
++
+ void main_window::ResizeIcons(int index)
+ {
+ 	if (ui->sizeSlider->value() != index)
+@@ -2676,27 +2701,7 @@ void main_window::CreateConnects()
+ 
+ 	connect(ui->bootSavestateAct, &QAction::triggered, this, &main_window::BootSavestate);
+ 
+-	connect(ui->addGamesAct, &QAction::triggered, this, [this]()
+-	{
+-		if (!m_gui_settings->GetBootConfirmation(this))
+-		{
+-			return;
+-		}
+-
+-		// Only select one folder for now
+-		const QString path_last_add_games = m_gui_settings->GetValue(gui::fd_add_games).toString();
+-		const QString dir = QFileDialog::getExistingDirectory(this, tr("Select a folder containing one or more games"), path_last_add_games, QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+-		if (dir.isEmpty())
+-		{
+-			return;
+-		}
+-
+-		m_gui_settings->SetValue(gui::fd_add_games, QFileInfo(dir).path());
+-
+-		QStringList paths;
+-		paths << dir;
+-		AddGamesFromDirs(std::move(paths));
+-	});
++	connect(ui->addGamesAct, &QAction::triggered, this, &main_window::OpenGameFolderPicker);
+ 
+ 	connect(ui->addIsoGamesAct, &QAction::triggered, this, [this]()
+ 	{
+@@ -3033,14 +3038,7 @@ void main_window::CreateConnects()
+ 		dlg.exec();
+ 	});
+ 
+-	const auto open_pad_settings = [this]
+-	{
+-		pad_settings_dialog* dlg = new pad_settings_dialog(m_gui_settings, this);
+-		dlg->setAttribute(Qt::WA_DeleteOnClose);
+-		dlg->open();
+-	};
+-
+-	connect(ui->confPadsAct, &QAction::triggered, this, open_pad_settings);
++	connect(ui->confPadsAct, &QAction::triggered, this, &main_window::OpenControllerSettings);
+ 
+ 	connect(ui->confBuzzAct, &QAction::triggered, this, [this]
+ 	{
+@@ -3692,7 +3690,7 @@ void main_window::CreateConnects()
+ 	});
+ 
+ 	connect(ui->toolbar_config, &QAction::triggered, this, [=]() { open_settings(0); });
+-	connect(ui->toolbar_controls, &QAction::triggered, this, open_pad_settings);
++	connect(ui->toolbar_controls, &QAction::triggered, this, &main_window::OpenControllerSettings);
+ 	connect(ui->toolbar_rpcn, &QAction::triggered, this, open_rpcn_settings);
+ 	connect(ui->toolbar_list, &QAction::triggered, this, [this]() { ui->setListModeAct->trigger(); });
+ 	connect(ui->toolbar_grid, &QAction::triggered, this, [this]() { ui->setGridModeAct->trigger(); });
+diff --git a/rpcs3/rpcs3qt/main_window.h b/rpcs3/rpcs3qt/main_window.h
+index 6a7bb99b5..06bb6c32a 100644
+--- a/rpcs3/rpcs3qt/main_window.h
++++ b/rpcs3/rpcs3qt/main_window.h
+@@ -74,6 +74,8 @@ public:
+ 	void Init();
+ 	QIcon GetAppIcon() const;
+ 	void OnMissingFw();
++	void OpenGameFolderPicker();
++	void OpenControllerSettings();
+ 	static bool InstallPackages(main_window* mw, QStringList file_paths = {}, bool from_boot = false, bool from_optical_drive = false);
+ 	static void InstallPup(main_window* mw, QString file_path = "");
+ 
+diff --git a/rpcs3/rpcs3qt/welcome_dialog.cpp b/rpcs3/rpcs3qt/welcome_dialog.cpp
+index 9eb7bfbd5..f20d67b93 100644
+--- a/rpcs3/rpcs3qt/welcome_dialog.cpp
++++ b/rpcs3/rpcs3qt/welcome_dialog.cpp
+@@ -2,14 +2,21 @@
+ #include "ui_welcome_dialog.h"
+ 
+ #include "gui_settings.h"
++#include "main_window.h"
+ #include "shortcut_utils.h"
+ #include "qt_utils.h"
+ 
+ #include "Utilities/File.h"
+ 
++#include <QGroupBox>
++#include <QHBoxLayout>
++#include <QLabel>
+ #include <QPushButton>
+ #include <QCheckBox>
++#include <QSysInfo>
+ #include <QSvgWidget>
++#include <QThread>
++#include <QVBoxLayout>
+ 
+ welcome_dialog::welcome_dialog(std::shared_ptr<gui_settings> gui_settings, bool is_manual_show, QWidget* parent)
+ 	: QDialog(parent)
+@@ -44,6 +51,62 @@ welcome_dialog::welcome_dialog(std::shared_ptr<gui_settings> gui_settings, bool
+ 		.arg(gui::utils::make_link(tr("Forums"), "https://forums.rpcs3.net"))
+ 		.arg(gui::utils::make_link(tr("Discord"), "https://discord.gg/rpcs3"))));
+ 
++	auto* setup_group = new QGroupBox(tr("Quick setup / الإعداد السريع"), this);
++	auto* setup_layout = new QVBoxLayout(setup_group);
++	auto* setup_description = new QLabel(
++		tr("Install firmware, add your own game folder, then configure a controller using RPCS3's existing tools.")
++		+ QStringLiteral("<br/><span dir=\"rtl\">ثبّت البرنامج الثابت، أضف مجلد ألعابك، ثم أعد إعداد وحدة التحكم باستخدام أدوات RPCS3 الأصلية.</span>"),
++		setup_group);
++	setup_description->setWordWrap(true);
++	setup_description->setTextFormat(Qt::RichText);
++	setup_layout->addWidget(setup_description);
++
++	auto* setup_buttons = new QHBoxLayout();
++	auto* firmware_button = new QPushButton(tr("Install firmware / تثبيت البرنامج الثابت"), setup_group);
++	auto* games_button = new QPushButton(tr("Add game folder / إضافة مجلد ألعاب"), setup_group);
++	auto* controller_button = new QPushButton(tr("Configure controller / إعداد التحكم"), setup_group);
++	setup_buttons->addWidget(firmware_button);
++	setup_buttons->addWidget(games_button);
++	setup_buttons->addWidget(controller_button);
++	setup_layout->addLayout(setup_buttons);
++
++	auto* sony_link = new QLabel(
++		QStringLiteral("<a href=\"https://www.playstation.com/ar-sa/support/hardware/ps3/system-software/\">")
++		+ tr("Official Sony firmware page / صفحة سوني الرسمية") + QStringLiteral("</a>"),
++		setup_group);
++	sony_link->setTextFormat(Qt::RichText);
++	sony_link->setOpenExternalLinks(true);
++	setup_layout->addWidget(sony_link);
++
++	const int logical_processors = QThread::idealThreadCount();
++	const QString cpu_summary = logical_processors > 0
++		? tr("%1 logical processors").arg(logical_processors)
++		: tr("Processor count unavailable");
++	auto* system_summary = new QLabel(
++		tr("System overview (not a compatibility guarantee): %1, %2, %3.")
++			.arg(QSysInfo::prettyProductName(), QSysInfo::currentCpuArchitecture(), cpu_summary)
++		+ QStringLiteral("<br/><span dir=\"rtl\">معلومات النظام (لا تضمن التوافق): %1، %2، %3.</span>")
++			.arg(QSysInfo::prettyProductName(), QSysInfo::currentCpuArchitecture(), cpu_summary),
++		setup_group);
++	system_summary->setWordWrap(true);
++	system_summary->setTextFormat(Qt::RichText);
++	setup_layout->addWidget(system_summary);
++
++	if (auto* window = qobject_cast<main_window*>(parent))
++	{
++		connect(firmware_button, &QPushButton::clicked, window, [window]() { main_window::InstallPup(window); });
++		connect(games_button, &QPushButton::clicked, window, &main_window::OpenGameFolderPicker);
++		connect(controller_button, &QPushButton::clicked, window, &main_window::OpenControllerSettings);
++	}
++	else
++	{
++		firmware_button->setEnabled(false);
++		games_button->setEnabled(false);
++		controller_button->setEnabled(false);
++	}
++
++	ui->layout_bottom->insertWidget(0, setup_group);
++
+ #ifdef __APPLE__
+ 	ui->create_applications_menu_shortcut->setText(tr("&Create Launchpad shortcut"));
+ 	ui->use_dark_theme->setVisible(false);

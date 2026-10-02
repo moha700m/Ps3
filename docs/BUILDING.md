@@ -36,9 +36,15 @@ msbuild rpcs3.sln /p:Configuration=Release /p:Platform=x64 /p:PreferredToolArchi
 
 The upstream solution and its CI setup scripts may require the versions and environment variables
 documented in the pinned `upstream/rpcs3/BUILDING.md` and `upstream/rpcs3/.github/workflows/rpcs3.yml`.
-The official Windows CI setup is run by this repository's
-[Windows baseline workflow](../.github/workflows/windows-baseline.yml). Its test step runs the upstream
-`build/lib/Release-x64/rpcs3_test.exe` when built.
+This repository keeps its application changes as reviewable patch files outside the pinned submodule.
+To apply the first-run UI patch before a local build:
+
+```bash
+(cd upstream/rpcs3 && git apply ../../patches/0001-bilingual-first-run-setup.patch)
+```
+
+The repository's [Windows workflow](../.github/workflows/windows-baseline.yml) applies this patch
+before building and runs `build/lib/Release-x64/rpcs3_test.exe` from the resulting build.
 
 When building with CMake, follow the pinned upstream `BUILDING.md` and explicitly set
 `-DUSE_NATIVE_INSTRUCTIONS=OFF` for distributable builds; do not compile only for the build host CPU.
@@ -46,22 +52,23 @@ The default upstream settings and required CPU feature level otherwise remain un
 
 ## Verification status and scope
 
-The [hosted Windows run](https://github.com/moha700m/Ps3/actions/runs/36964132376) for the pinned
-source and VS2026 toolchain completed the unmodified upstream Release build and passed 150 unit tests
-across 16 test cases. Checksum validation and the Windows-backslash/path-with-spaces/CRLF checksum
-fixture passed, but package validation failed because the workflow expected `bin/rpcs3.exe`; the
-actual 7z listing has `rpcs3.exe` and `qt6\plugins\platforms\qwindows.dll` at archive root. No binary
-artifact was uploaded. The workflow now validates those observed root paths, extracts the archive,
-checks both required files exist, and caches upstream dependency downloads and MSVC compilation
-results to avoid unnecessary repeated downloads and compilation. This correction still needs a
-successful hosted run. A hosted build or unit-test pass does not demonstrate GUI behavior,
-GPU/backend compatibility, game boot, performance, physical controller behavior, or a portable
-end-user package. Those require separate Windows hardware and user-owned test content. This repository
-does not include firmware, games, or license files.
+The [hosted Windows run](https://github.com/moha700m/Ps3/actions/runs/36984899813) successfully built
+the unmodified pinned RPCS3 Release x64 source, passed 150 unit tests across 16 test cases, validated
+the package SHA-256 and extracted executable/Qt platform plugin, and uploaded a 38.5 MB build archive
+and test report. The [build artifact](https://github.com/moha700m/Ps3/actions/artifacts/11219029122)
+is a baseline RPCS3 archive, not the final branded ZIP.
 
-The baseline workflow is configured to produce an upstream build archive and SHA-256 only after
-checking that the archive exists, its checksum matches, and it contains the executable and Qt
-Windows platform plugin. The packaging verification correction itself still needs a new hosted run.
-This baseline is not the branded
-`MohammedLab-PS3-Windows-x64.zip`. Qt deployment validation, branding, portable data paths, runtime
-checks, and local hardware tests are still required before an end-user release.
+The project now carries `patches/0001-bilingual-first-run-setup.patch`. It adds an English/Arabic
+quick-setup panel to RPCS3's existing welcome dialog, with buttons wired to the existing firmware
+installer, game-folder scanner, and controller settings, plus a basic OS/CPU overview explicitly
+marked as non-certifying. The Windows workflow applies this patch before compiling and testing. That
+modified build has not yet had a hosted run, and the successful baseline result above does not validate
+this patch.
+
+This increment does not yet provide a complete Arabic translation of the emulator UI, full
+requirements-based hardware diagnostics, controller connection/button testing, or
+`MohammedLab-PS3-Windows-x64.zip`. The baseline artifact also does not validate extracted-user
+execution, runtime dependencies, writable portable data paths, or matching-source release packaging.
+A hosted build/unit-test pass does not demonstrate GUI behavior, GPU/backend compatibility, game boot,
+performance, or physical-controller behavior; those need separate Windows hardware and user-owned
+test content. Firmware, games, and license files are not included in this repository or CI.

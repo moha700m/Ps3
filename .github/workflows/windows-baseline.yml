@@ -10,7 +10,7 @@ permissions:
 jobs:
   release-x64:
     name: Unmodified upstream Release and unit tests
-    runs-on: windows-2022
+    runs-on: windows-2025-vs2026
     env:
       QT_VER_MAIN: '6'
       QT_VER: '6.11.2'
@@ -40,8 +40,80 @@ jobs:
       - name: Set up NuGet
         uses: nuget/setup-nuget@v2.0.0
 
-      - name: Set up MSBuild
+      - name: Set up Visual Studio 2026 MSBuild
         uses: microsoft/setup-msbuild@v2.0.0
+        with:
+          vs-version: '[18.0,19.0)'
+          msbuild-architecture: x64
+
+      - name: Verify and record MSVC, linker, and STL versions
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vsInstall = & $vswhere -latest -products '*' -version '[18.0,19.0)' -requires Microsoft.Component.MSBuild -property installationPath
+          $vsVersion = & $vswhere -latest -products '*' -version '[18.0,19.0)' -requires Microsoft.Component.MSBuild -property installationVersion
+          if (-not $vsInstall -or -not $vsVersion.StartsWith('18.')) {
+            throw "Expected Visual Studio 2026 (18.x), found '$vsVersion' at '$vsInstall'."
+          }
+          $msbuildPath = (Get-Command msbuild -ErrorAction Stop).Source
+          if (-not $msbuildPath.StartsWith($vsInstall, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "setup-msbuild selected '$msbuildPath', outside the expected Visual Studio 2026 installation '$vsInstall'."
+          }
+          $vsDevCmd = Join-Path $vsInstall 'Common7\Tools\VsDevCmd.bat'
+          $toolchainCmd = Join-Path $env:RUNNER_TEMP 'toolchain-versions.cmd'
+          @"
+          @echo off
+          call "$vsDevCmd" -no_logo -arch=amd64
+          if errorlevel 1 exit /b %errorlevel%
+          cl /Bv
+          link /? 2>&1 | findstr /b /c:"Microsoft (R) Incremental Linker"
+          "@ | Set-Content -Encoding ascii $toolchainCmd
+          $toolchainOutput = & $env:ComSpec /d /c $toolchainCmd 2>&1
+          if ($LASTEXITCODE -ne 0 -or
+              ($toolchainOutput -join "`n") -notmatch 'Microsoft \(R\) C/C\+\+ Optimizing Compiler Version' -or
+              ($toolchainOutput -join "`n") -notmatch 'Microsoft \(R\) Incremental Linker Version') {
+            $toolchainOutput | Write-Output
+            throw 'Could not verify the selected MSVC compiler and linker versions.'
+          }
+          $toolchainOutput | Write-Output
+          @(
+            "Visual Studio: $vsVersion ($vsInstall)"
+            "MSBuild: $msbuildPath"
+            'Compiler and linker version output:'
+            $toolchainOutput
+          ) | Add-Content $env:GITHUB_STEP_SUMMARY
+
+          $stlSource = Join-Path $env:RUNNER_TEMP 'stl-version.cpp'
+          $stlObject = Join-Path $env:RUNNER_TEMP 'stl-version.obj'
+          $stlCmd = Join-Path $env:RUNNER_TEMP 'stl-version.cmd'
+          @'
+          #include <yvals_core.h>
+          #define STRINGIZE_DETAIL(value) #value
+          #define STRINGIZE(value) STRINGIZE_DETAIL(value)
+          #pragma message("MSVC_STL_VERSION=" STRINGIZE(_MSVC_STL_VERSION))
+          #ifndef _MSVC_STL_UPDATE
+          #define _MSVC_STL_UPDATE 0
+          #endif
+          #pragma message("MSVC_STL_UPDATE=" STRINGIZE(_MSVC_STL_UPDATE))
+          int main() { return 0; }
+          '@ | Set-Content -Encoding ascii $stlSource
+          @"
+          @echo off
+          call "$vsDevCmd" -no_logo -arch=amd64
+          if errorlevel 1 exit /b %errorlevel%
+          cl /nologo /c /TP /W0 "$stlSource" /Fo:"$stlObject"
+          "@ | Set-Content -Encoding ascii $stlCmd
+          $stlOutput = & $env:ComSpec /d /c $stlCmd 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            $stlOutput | Write-Output
+            throw 'Could not query the selected MSVC STL version.'
+          }
+          if (($stlOutput -join "`n") -notmatch 'MSVC_STL_VERSION=\d+') {
+            $stlOutput | Write-Output
+            throw 'The selected MSVC STL version was not found in compiler output.'
+          }
+          $stlOutput | Write-Output
+          $stlOutput | Add-Content $env:GITHUB_STEP_SUMMARY
 
       - name: Install upstream build dependencies
         shell: bash

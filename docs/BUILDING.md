@@ -10,20 +10,22 @@ instructions, history, and documentation remain at the root.
 
 The pinned upstream `BUILDING.md` and Windows workflow specify:
 
-- Windows 10 or later, x64, Visual Studio 2022 MSVC (the upstream docs also mention Visual Studio 2026).
-- Qt 6.11.2 for MSVC 2022 x64.
+- Windows 10 or later, x64, Visual Studio 2026 MSVC (18.x), matching the pinned upstream Windows CI runner.
+- Qt 6.11.2 for the MSVC 2022 x64 ABI package, as selected by upstream CI; this is distinct from the VS2026 compiler toolset.
 - Vulkan SDK 1.4.341.1.
 - LLVM 22.1.8.
 - CMake 3.28.0 or later if using the CMake build; Visual Studio's integrated CMake is also supported.
 - Python 3.6 or later for upstream build steps.
 
-The hosted baseline workflow uses the pinned upstream `.ci/setup-windows.sh` and MSBuild procedure,
-with dependency versions/checksums from the pinned upstream `.github/workflows/rpcs3.yml`. It does not
-publish to RPCS3 repositories or use RPCS3 release secrets.
+The hosted baseline workflow uses the `windows-2025-vs2026` runner and explicitly selects MSBuild
+from Visual Studio 18.x. It records the selected compiler, linker, and MSVC STL versions before
+building. This matches the pinned upstream `.github/workflows/rpcs3.yml`; it also uses the pinned
+upstream `.ci/setup-windows.sh` and dependency versions/checksums. It does not publish to RPCS3
+repositories or use RPCS3 release secrets.
 
 ## Reproduce the upstream Release build
 
-From a Visual Studio Developer PowerShell opened at the repository root:
+From a Visual Studio 2026 Developer PowerShell opened at the repository root:
 
 ```powershell
 git submodule update --init --recursive

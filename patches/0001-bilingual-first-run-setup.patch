@@ -2,23 +2,14 @@ diff --git a/rpcs3/rpcs3qt/gui_application.cpp b/rpcs3/rpcs3qt/gui_application.c
 index 9b5105e47..a2d1009fb 100644
 --- a/rpcs3/rpcs3qt/gui_application.cpp
 +++ b/rpcs3/rpcs3qt/gui_application.cpp
-@@ -226,7 +226,7 @@ int gui_application::exec()
- 	{
- 		steps->push_back([this]()
- 		{
+@@ -229 +229 @@ int gui_application::exec()
 -			welcome_dialog* welcome = new welcome_dialog(m_gui_settings, false);
 +			welcome_dialog* welcome = new welcome_dialog(m_gui_settings, false, m_main_window);
- 			connect(welcome, &QDialog::finished, this, [this](int result)
- 			{
- 				if (result == QDialog::Rejected)
 diff --git a/rpcs3/rpcs3qt/main_window.cpp b/rpcs3/rpcs3qt/main_window.cpp
 index 4b2421068..37f9e0bd0 100644
 --- a/rpcs3/rpcs3qt/main_window.cpp
 +++ b/rpcs3/rpcs3qt/main_window.cpp
-@@ -373,6 +373,31 @@ void main_window::OnMissingFw()
- 	});
- }
- 
+@@ -375,0 +376,25 @@ void main_window::OnMissingFw()
 +void main_window::OpenGameFolderPicker()
 +{
 +	if (!m_gui_settings->GetBootConfirmation(this))
@@ -44,13 +35,7 @@ index 4b2421068..37f9e0bd0 100644
 +	dlg->open();
 +}
 +
- void main_window::ResizeIcons(int index)
- {
- 	if (ui->sizeSlider->value() != index)
-@@ -2676,27 +2701,7 @@ void main_window::CreateConnects()
- 
- 	connect(ui->bootSavestateAct, &QAction::triggered, this, &main_window::BootSavestate);
- 
+@@ -2679,21 +2704 @@ void main_window::CreateConnects()
 -	connect(ui->addGamesAct, &QAction::triggered, this, [this]()
 -	{
 -		if (!m_gui_settings->GetBootConfirmation(this))
@@ -73,13 +58,7 @@ index 4b2421068..37f9e0bd0 100644
 -		AddGamesFromDirs(std::move(paths));
 -	});
 +	connect(ui->addGamesAct, &QAction::triggered, this, &main_window::OpenGameFolderPicker);
- 
- 	connect(ui->addIsoGamesAct, &QAction::triggered, this, [this]()
- 	{
-@@ -3033,14 +3038,7 @@ void main_window::CreateConnects()
- 		dlg.exec();
- 	});
- 
+@@ -3036,8 +3041 @@ void main_window::CreateConnects()
 -	const auto open_pad_settings = [this]
 -	{
 -		pad_settings_dialog* dlg = new pad_settings_dialog(m_gui_settings, this);
@@ -89,61 +68,32 @@ index 4b2421068..37f9e0bd0 100644
 -
 -	connect(ui->confPadsAct, &QAction::triggered, this, open_pad_settings);
 +	connect(ui->confPadsAct, &QAction::triggered, this, &main_window::OpenControllerSettings);
- 
- 	connect(ui->confBuzzAct, &QAction::triggered, this, [this]
- 	{
-@@ -3692,7 +3690,7 @@ void main_window::CreateConnects()
- 	});
- 
- 	connect(ui->toolbar_config, &QAction::triggered, this, [=]() { open_settings(0); });
+@@ -3695 +3693 @@ void main_window::CreateConnects()
 -	connect(ui->toolbar_controls, &QAction::triggered, this, open_pad_settings);
 +	connect(ui->toolbar_controls, &QAction::triggered, this, &main_window::OpenControllerSettings);
- 	connect(ui->toolbar_rpcn, &QAction::triggered, this, open_rpcn_settings);
- 	connect(ui->toolbar_list, &QAction::triggered, this, [this]() { ui->setListModeAct->trigger(); });
- 	connect(ui->toolbar_grid, &QAction::triggered, this, [this]() { ui->setGridModeAct->trigger(); });
 diff --git a/rpcs3/rpcs3qt/main_window.h b/rpcs3/rpcs3qt/main_window.h
 index 6a7bb99b5..06bb6c32a 100644
 --- a/rpcs3/rpcs3qt/main_window.h
 +++ b/rpcs3/rpcs3qt/main_window.h
-@@ -74,6 +74,8 @@ public:
- 	void Init();
- 	QIcon GetAppIcon() const;
- 	void OnMissingFw();
+@@ -76,0 +77,2 @@ public:
 +	void OpenGameFolderPicker();
 +	void OpenControllerSettings();
- 	static bool InstallPackages(main_window* mw, QStringList file_paths = {}, bool from_boot = false, bool from_optical_drive = false);
- 	static void InstallPup(main_window* mw, QString file_path = "");
- 
 diff --git a/rpcs3/rpcs3qt/welcome_dialog.cpp b/rpcs3/rpcs3qt/welcome_dialog.cpp
 index 9eb7bfbd5..f20d67b93 100644
 --- a/rpcs3/rpcs3qt/welcome_dialog.cpp
 +++ b/rpcs3/rpcs3qt/welcome_dialog.cpp
-@@ -2,14 +2,21 @@
- #include "ui_welcome_dialog.h"
- 
- #include "gui_settings.h"
+@@ -4,0 +5 @@
 +#include "main_window.h"
- #include "shortcut_utils.h"
- #include "qt_utils.h"
- 
- #include "Utilities/File.h"
- 
+@@ -9,0 +11,3 @@
 +#include <QGroupBox>
 +#include <QHBoxLayout>
 +#include <QLabel>
- #include <QPushButton>
- #include <QCheckBox>
+@@ -11,0 +16 @@
 +#include <QSysInfo>
- #include <QSvgWidget>
+@@ -12,0 +18,2 @@
 +#include <QThread>
 +#include <QVBoxLayout>
- 
- welcome_dialog::welcome_dialog(std::shared_ptr<gui_settings> gui_settings, bool is_manual_show, QWidget* parent)
- 	: QDialog(parent)
-@@ -44,6 +51,62 @@ welcome_dialog::welcome_dialog(std::shared_ptr<gui_settings> gui_settings, bool
- 		.arg(gui::utils::make_link(tr("Forums"), "https://forums.rpcs3.net"))
- 		.arg(gui::utils::make_link(tr("Discord"), "https://discord.gg/rpcs3"))));
- 
+@@ -46,0 +54,56 @@ welcome_dialog::welcome_dialog(std::shared_ptr<gui_settings> gui_settings, bool
 +	auto* setup_group = new QGroupBox(tr("Quick setup / الإعداد السريع"), this);
 +	auto* setup_layout = new QVBoxLayout(setup_group);
 +	auto* setup_description = new QLabel(
@@ -200,6 +150,3 @@ index 9eb7bfbd5..f20d67b93 100644
 +
 +	ui->layout_bottom->insertWidget(0, setup_group);
 +
- #ifdef __APPLE__
- 	ui->create_applications_menu_shortcut->setText(tr("&Create Launchpad shortcut"));
- 	ui->use_dark_theme->setVisible(false);

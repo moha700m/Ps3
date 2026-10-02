@@ -165,7 +165,7 @@ jobs:
       - name: Apply MohammedLab first-run setup overlay
         shell: bash
         working-directory: upstream/rpcs3
-        run: git apply "$GITHUB_WORKSPACE/patches/0001-bilingual-first-run-setup.patch"
+        run: git apply --unidiff-zero "$GITHUB_WORKSPACE/patches/0001-bilingual-first-run-setup.patch"
 
       - name: Build MohammedLab PS3 Release x64
         id: build

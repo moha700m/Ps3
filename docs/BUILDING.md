@@ -40,7 +40,7 @@ This repository keeps its application changes as reviewable patch files outside 
 To apply the first-run UI patch before a local build:
 
 ```bash
-(cd upstream/rpcs3 && git apply ../../patches/0001-bilingual-first-run-setup.patch)
+(cd upstream/rpcs3 && git apply --unidiff-zero ../../patches/0001-bilingual-first-run-setup.patch)
 ```
 
 The repository's [Windows workflow](../.github/workflows/windows-baseline.yml) applies this patch

@@ -58,17 +58,24 @@ the package SHA-256 and extracted executable/Qt platform plugin, and uploaded a 
 and test report. The [build artifact](https://github.com/moha700m/Ps3/actions/artifacts/11219029122)
 is a baseline RPCS3 archive, not the final branded ZIP.
 
-The project now carries `patches/0001-bilingual-first-run-setup.patch`. It adds an English/Arabic
-quick-setup panel to RPCS3's existing welcome dialog, with buttons wired to the existing firmware
-installer, game-folder scanner, and controller settings, plus a basic OS/CPU overview explicitly
-marked as non-certifying. The Windows workflow applies this patch before compiling and testing. That
-modified build has not yet had a hosted run, and the successful baseline result above does not validate
-this patch.
+The project carries `patches/0001-bilingual-first-run-setup.patch`. It adds a saved English/Arabic
+selector to RPCS3's welcome dialog, switches the Qt application layout direction for Arabic, and
+retains Arabic selection when no full `rpcs3_ar.qm` catalog is present. In that case the added setup
+labels and diagnostics are Arabic, while the rest of the upstream interface remains in its existing
+language (typically English). Firmware installation, game-folder scanning, and controller settings
+remain connected to RPCS3's existing actions.
 
-This increment does not yet provide a complete Arabic translation of the emulator UI, full
-requirements-based hardware diagnostics, controller connection/button testing, or
-`MohammedLab-PS3-Windows-x64.zip`. The baseline artifact also does not validate extracted-user
-execution, runtime dependencies, writable portable data paths, or matching-source release packaging.
-A hosted build/unit-test pass does not demonstrate GUI behavior, GPU/backend compatibility, game boot,
-performance, or physical-controller behavior; those need separate Windows hardware and user-owned
-test content. Firmware, games, and license files are not included in this repository or CI.
+The setup panel reports OS/architecture, CPU model/thread count and selected CPU features, total
+memory, RPCS3's Vulkan enumeration and adapters, OpenGL backend availability (without claiming a GPU
+probe), free space on the user-data volume, a temporary-file write test in the user-data directory,
+and connected RPCS3 pad slots if a controller session is active. Missing/unavailable data is labelled;
+the panel does not certify hardware compatibility, enumerate physical controllers outside an active
+RPCS3 input session, or test buttons. The modified patch still needs a hosted Windows build, upstream
+unit tests, and GUI validation; the successful baseline run above validates only unmodified RPCS3.
+
+The complete Arabic translation, compatibility-requirements comparison, full controller
+connection/button testing, `MohammedLab-PS3-Windows-x64.zip`, matching-source release bundle, and
+isolated extracted-user smoke test remain unfinished. A hosted build/unit-test pass does not
+demonstrate GUI behavior, GPU/backend compatibility, game boot, performance, or physical-controller
+behavior; those need separate Windows hardware and user-owned test content. Firmware, games, and
+license files are not included in this repository or CI.

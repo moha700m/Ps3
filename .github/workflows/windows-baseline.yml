@@ -156,20 +156,75 @@ jobs:
         run: |
           mkdir -p "$BUILD_ARTIFACTSTAGINGDIRECTORY"
           .ci/deploy-windows.sh
-          archive="$BUILD_ARTIFACTSTAGINGDIRECTORY/$BUILD"
+          artifact_dir=$(cygpath -u "$BUILD_ARTIFACTSTAGINGDIRECTORY")
+          archive="$artifact_dir/$BUILD"
           checksum="$archive.sha256"
+          source_checksum="$BUILD.sha256"
           test -s "$archive" || { echo "Missing build archive: $archive" >&2; exit 1; }
           test -s "$checksum" || { echo "Missing SHA-256 file: $checksum" >&2; exit 1; }
-          expected_hash=$(cat "$checksum")
-          actual_hash=$(sha256sum "$archive" | awk '{ print $1 }')
-          test "$expected_hash" = "$actual_hash" || { echo "Archive SHA-256 mismatch" >&2; exit 1; }
+
+          read_hash() {
+            local file=$1 normalized
+            normalized=$(tr -d '\r\n' < "$file")
+            if [[ ! "$normalized" =~ ^[[:xdigit:]]{64}$ ]]; then
+              printf 'Invalid SHA-256 content in %s (normalized length: %s)\n' "$file" "${#normalized}" >&2
+              return 1
+            fi
+            printf '%s' "${normalized,,}"
+          }
+
+          verify_hash() {
+            local label=$1 expected=$2 actual=$3
+            if [[ "$expected" != "$actual" ]]; then
+              printf '%s SHA-256 mismatch: expected=%s (length %s), actual=%s (length %s)\n' \
+                "$label" "$expected" "${#expected}" "$actual" "${#actual}" >&2
+              return 1
+            fi
+          }
+
+          normalize_listing() {
+            sed -E 's#^Path = \./?#Path = #; s#\\#/#g'
+          }
+
+          # Regression check: Windows separators, spaces, and CRLF checksum files.
+          test_dir=$(mktemp -d)
+          trap 'rm -rf "$test_dir"' EXIT
+          mkdir -p "$test_dir/checksum regression"
+          printf 'checksum path conversion regression\n' > "$test_dir/checksum regression/sample.7z"
+          test_hash=$(sha256sum "$test_dir/checksum regression/sample.7z" | cut -d ' ' -f1)
+          printf '%s\r\n' "$test_hash" > "$test_dir/checksum regression/sample.7z.sha256"
+          windows_test_path="$(cygpath -w "$test_dir")\\checksum regression\\sample.7z"
+          posix_test_path="$(cygpath -u "$windows_test_path")"
+          test_expected=$(read_hash "$posix_test_path.sha256")
+          test_actual=$(sha256sum "$posix_test_path" | cut -d ' ' -f1)
+          verify_hash 'Windows path/CRLF regression fixture' "$test_expected" "$test_actual"
+          printf 'Checksum regression fixture passed (%s; Windows path contained backslashes and spaces, checksum used CRLF).\n' \
+            "$windows_test_path"
+
+          test_listing=$(printf 'Path = bin\\rpcs3.exe\nPath = ./bin\\qt6\\plugins\\platforms\\qwindows.dll\n')
+          normalized_test_listing=$(printf '%s\n' "$test_listing" | normalize_listing)
+          grep -Fqx 'Path = bin/rpcs3.exe' <<< "$normalized_test_listing"
+          grep -Fqx 'Path = bin/qt6/plugins/platforms/qwindows.dll' <<< "$normalized_test_listing"
+          printf '7z path normalization regression fixture passed.\n'
+          rm -rf "$test_dir"
+          trap - EXIT
+
+          expected_hash=$(read_hash "$source_checksum")
+          copied_hash=$(read_hash "$checksum")
+          original_hash=$(sha256sum "$BUILD" | cut -d ' ' -f1)
+          copied_archive_hash=$(sha256sum "$archive" | cut -d ' ' -f1)
+          verify_hash 'Original archive' "$expected_hash" "$original_hash"
+          verify_hash 'Copied archive checksum' "$expected_hash" "$copied_hash"
+          verify_hash 'Copied archive' "$expected_hash" "$copied_archive_hash"
+
           listing=$(7z l -slt "$archive")
+          printf '%s\n' "$listing" | grep -E 'Path = .*(rpcs3\.exe|qwindows\.dll)$' || true
+          normalized_listing=$(printf '%s\n' "$listing" | normalize_listing)
           for required_path in \
             'bin/rpcs3.exe' \
             'bin/qt6/plugins/platforms/qwindows.dll'
           do
-            grep -Fqx "Path = $required_path" <<< "$listing" ||
-              grep -Fqx "Path = ./$required_path" <<< "$listing" ||
+            grep -Fqx "Path = $required_path" <<< "$normalized_listing" ||
               { echo "Missing required archive resource: $required_path" >&2; exit 1; }
           done
 

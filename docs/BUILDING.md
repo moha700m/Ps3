@@ -46,15 +46,21 @@ The default upstream settings and required CPU feature level otherwise remain un
 
 ## Verification status and scope
 
-The Actions workflow compiles the unmodified upstream source as a Windows x64 Release and runs the
-upstream unit-test executable. A hosted build or unit-test pass does not demonstrate GUI behavior,
+The [hosted Windows run](https://github.com/moha700m/Ps3/actions/runs/36959767086) for the pinned
+source and VS2026 toolchain completed the unmodified upstream Release build and passed 150 unit tests
+across 16 test cases. Its package step failed during SHA-256 verification, so no binary artifact was
+uploaded from that run. The workflow now uses POSIX-normalized paths for GNU `sha256sum`, validates
+the digest format and CR/LF handling, checks both the original and copied archive against the original
+checksum, and runs Windows-backslash/path-with-spaces/CRLF and 7z path-separator regression fixtures.
+The packaging correction still needs a successful hosted run. A hosted build or unit-test pass does
+not demonstrate GUI behavior,
 GPU/backend compatibility, game boot, performance, physical controller behavior, or a portable
 end-user package. Those require separate Windows hardware and user-owned test content. This repository
 does not include firmware, games, or license files.
 
 The baseline workflow is configured to produce an upstream build archive and SHA-256 only after
 checking that the archive exists, its checksum matches, and it contains the executable and Qt
-Windows platform plugin. No successful Windows build or artifact is confirmed for this revision yet;
-check the repository Actions run for an actual result. This baseline is not the branded
+Windows platform plugin. The packaging verification correction itself still needs a new hosted run.
+This baseline is not the branded
 `MohammedLab-PS3-Windows-x64.zip`. Qt deployment validation, branding, portable data paths, runtime
 checks, and local hardware tests are still required before an end-user release.

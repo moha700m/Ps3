@@ -50,7 +50,9 @@ GPU/backend compatibility, game boot, performance, physical controller behavior,
 end-user package. Those require separate Windows hardware and user-owned test content. This repository
 does not include firmware, games, or license files.
 
-The baseline workflow currently produces an upstream build artifact and SHA-256 for verification;
-it is not yet the branded `MohammedLab-PS3-Windows-x64.zip`. Do not treat it as a finished end-user
-release until the Qt deployment, branding, portable data paths, runtime checks, and local hardware
-tests have been completed.
+The baseline workflow is configured to produce an upstream build archive and SHA-256 only after
+checking that the archive exists, its checksum matches, and it contains the executable and Qt
+Windows platform plugin. No successful Windows build or artifact is confirmed for this revision yet;
+check the repository Actions run for an actual result. This baseline is not the branded
+`MohammedLab-PS3-Windows-x64.zip`. Qt deployment validation, branding, portable data paths, runtime
+checks, and local hardware tests are still required before an end-user release.

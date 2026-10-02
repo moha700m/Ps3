@@ -84,14 +84,39 @@ jobs:
         run: |
           mkdir -p "$BUILD_ARTIFACTSTAGINGDIRECTORY"
           .ci/deploy-windows.sh
+          archive="$BUILD_ARTIFACTSTAGINGDIRECTORY/$BUILD"
+          checksum="$archive.sha256"
+          test -s "$archive" || { echo "Missing build archive: $archive" >&2; exit 1; }
+          test -s "$checksum" || { echo "Missing SHA-256 file: $checksum" >&2; exit 1; }
+          expected_hash=$(cat "$checksum")
+          actual_hash=$(sha256sum "$archive" | awk '{ print $1 }')
+          test "$expected_hash" = "$actual_hash" || { echo "Archive SHA-256 mismatch" >&2; exit 1; }
+          listing=$(7z l -slt "$archive")
+          for required_path in \
+            'bin/rpcs3.exe' \
+            'bin/qt6/plugins/platforms/qwindows.dll'
+          do
+            grep -Fqx "Path = $required_path" <<< "$listing" ||
+              grep -Fqx "Path = ./$required_path" <<< "$listing" ||
+              { echo "Missing required archive resource: $required_path" >&2; exit 1; }
+          done
 
-      - name: Upload build, checksum, and test report
-        if: always()
+      - name: Upload validated upstream package and checksum
+        if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: rpcs3-upstream-baseline-windows-x64
           path: |
-            artifacts/*
-            upstream/rpcs3/test-results.txt
-          if-no-files-found: warn
+            artifacts/${{ env.BUILD }}
+            artifacts/${{ env.BUILD }}.sha256
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload unit-test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rpcs3-upstream-unit-test-report
+          path: upstream/rpcs3/test-results.txt
+          if-no-files-found: ignore
           compression-level: 0
